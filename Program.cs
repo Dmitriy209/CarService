@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace CarService
 {
@@ -30,22 +31,24 @@ namespace CarService
             int minLimitMoney = 10000;
             int maxLimitMoney = 100000;
 
+            CreatorListCars creatorListCars = new CreatorListCars();
+
             _money = UserUtils.GenerateRandomNumber(minLimitMoney, maxLimitMoney);
-            _cars = GenerateCars();
+            _cars = creatorListCars.GenerateCars();
         }
 
         public void Work()
         {
             int remainderCars = _cars.Count;
 
-            for (int i =0; i< remainderCars; i++)
+            for (int i = 0; i < remainderCars; i++)
             {
                 Console.WriteLine($"В очереди {_cars.Count} машин");
 
-                if (IsService())
+                if (IsServe())
                     TryRepairCar(_cars.Dequeue());
                 else
-                    DeleteMoney(_fixPenalty);
+                    DecreaseMoney(_fixPenalty);
             }
 
             Console.WriteLine("Всё сделано.");
@@ -69,31 +72,29 @@ namespace CarService
 
             do
             {
-                if (_storage.PartsCount != 0)
-                {
-                    Console.WriteLine($"Осталось {_storage.PartsCount} деталей.");
+                Console.WriteLine($"Осталось {_storage.PartsCount} деталей.");
 
-                    if (IsService())
+                if (IsServe())
+                {
+                    if (TryRepairPart(car, out Car carAfterRepair))
                     {
-                        if (TryRepairPart(ref car))
-                            isService = true;
-                        else
-                            isService = false;
+                        car = carAfterRepair;
+
+                        isService = true;
                     }
                     else
                     {
                         isService = false;
-                        break;
                     }
                 }
                 else
                 {
-                    break;
+                    isService = false;
                 }
             }
-            while (car.CountBrokenParts != 0);
+            while (car.CountBrokenParts != 0 && _storage.PartsCount != 0 && isService);
 
-            if (IsRepairSuccess(car) && isService)
+            if (IsFixSuccess(car) && isService)
                 AddMoney(_priceRepair);
             else
                 CountPenalty(car.CountBrokenParts);
@@ -101,29 +102,29 @@ namespace CarService
             Console.WriteLine($"Счет автосервиса: {_money}.");
         }
 
-        private bool TryRepairPart(ref Car car)
+        private bool TryRepairPart(Car car, out Car carAfterRepair)
         {
             Part unbrokenPart = null;
 
-            if (car.TryGetBrokenPart(out Part part) && _storage.TryGetPart(part, out unbrokenPart))
+            if (car.TryGetBrokenPart(out Part part) && _storage.TryGetPart(part.Name, out unbrokenPart))
             {
                 car.ReplaceBrokenPart(unbrokenPart);
 
                 car.ShowBrokenPartsCountMessage();
 
                 CountPrice(unbrokenPart.Cost);
-
-                return true;
             }
             else
             {
                 Console.WriteLine("Что-то пошло не так.");
-
-                return false;
             }
+
+            carAfterRepair = car;
+
+            return car.TryGetBrokenPart(out part) && _storage.TryGetPart(part.Name, out unbrokenPart);
         }
 
-        private bool IsRepairSuccess(Car car)
+        private bool IsFixSuccess(Car car)
         {
             if (car.CountBrokenParts != 0)
                 return false;
@@ -131,17 +132,14 @@ namespace CarService
                 return true;
         }
 
-        private bool IsService()
+        private bool IsServe()
         {
-            string CommandDontService = "1";
+            string commandDontService = "1";
 
-            Console.WriteLine($"Введите {CommandDontService}, чтобы не обслуживать.");
+            Console.WriteLine($"Введите {commandDontService}, чтобы не обслуживать.");
             string userInput = Console.ReadLine();
 
-            if (userInput == CommandDontService)
-                return false;
-            else
-                return true;
+            return userInput != commandDontService;
         }
 
         private void CountPrice(int money)
@@ -153,7 +151,7 @@ namespace CarService
         {
             int penalty = countBrokenParts * _fixPenaltyForPart;
 
-            DeleteMoney(penalty);
+            DecreaseMoney(penalty);
         }
 
         private void AddMoney(int money)
@@ -161,13 +159,15 @@ namespace CarService
             _money += money;
         }
 
-        private void DeleteMoney(int money)
+        private void DecreaseMoney(int money)
         {
             _money -= money;
         }
+    }
 
-
-        private Queue<Car> GenerateCars()
+    class CreatorListCars
+    {
+        public Queue<Car> GenerateCars()
         {
             int minLimitAmountCar = 5;
             int maxLimitAmountCar = 10;
@@ -192,16 +192,9 @@ namespace CarService
             int minLimitAmountPart = 20;
             int maxLimitAmountPart = 50;
 
-            List<Part> parts = new List<Part>();
+            CreatorListParts creatorListParts = new CreatorListParts();
 
-            CreatorPart creatorPart = new CreatorPart();
-
-            parts.Add(creatorPart.GenerateBrokenPart());
-
-            int amountPart = UserUtils.GenerateRandomNumber(minLimitAmountPart, maxLimitAmountPart) - 1;
-
-            for (int i = 0; i < amountPart; i++)
-                parts.Add(creatorPart.GeneratePart());
+            List<Part> parts = creatorListParts.GenerateParts(minLimitAmountPart, maxLimitAmountPart);
 
             return new Car(parts);
         }
@@ -209,14 +202,12 @@ namespace CarService
 
     class Car
     {
-        private int _amountPart;
         private List<Part> _parts;
         private List<Part> _brokenParts = new List<Part>();
 
         public Car(List<Part> parts)
         {
             _parts = parts;
-            _amountPart = parts.Count;
 
             CreateListBrokenParts();
         }
@@ -229,8 +220,7 @@ namespace CarService
             {
                 if (_parts[i].Name == part.Name && _parts[i].IsBroken)
                 {
-                    _parts.Remove(_parts[i]);
-                    _parts.Add(part);
+                    _parts[i] = part;
 
                     Console.WriteLine("Деталь заменена.");
                     break;
@@ -276,6 +266,39 @@ namespace CarService
         }
     }
 
+    class CreatorListParts
+    {
+        public List<Part> GenerateParts(int minLimitAmountPart, int maxLimitAmountPart)
+        {
+            List<Part> parts = new List<Part>();
+
+            int amountPart = UserUtils.GenerateRandomNumber(minLimitAmountPart, maxLimitAmountPart) - 1;
+
+            CreatorPart creatorPart = new CreatorPart();
+
+            parts.Add(creatorPart.GenerateBrokenPart());
+
+            for (int i = 0; i < amountPart; i++)
+                parts.Add(creatorPart.GeneratePart());
+
+            return parts;
+        }
+
+        public List<Part> GenerateUnbrokenParts(int minLimitAmountPart, int maxLimitAmountPart)
+        {
+            List<Part> parts = new List<Part>();
+
+            int amountPart = UserUtils.GenerateRandomNumber(minLimitAmountPart, maxLimitAmountPart);
+
+            CreatorPart creatorPart = new CreatorPart();
+
+            for (int i = 0; i < amountPart; i++)
+                parts.Add(creatorPart.GenerateUnbrokenPart());
+
+            return parts;
+        }
+    }
+
     class CreatorPart
     {
         public Part GeneratePart()
@@ -311,9 +334,9 @@ namespace CarService
 
         private string GetNamePart()
         {
-            List<string> Names = new List<string>() { "колесо", "аккумулятор", "двигатель", "свеча зажигания", "окно", "прокладка", "колодка тормозная" };
+            List<string> names = new List<string>() { "колесо", "аккумулятор", "двигатель", "свеча зажигания", "окно", "прокладка", "колодка тормозная" };
 
-            return Names[UserUtils.GenerateRandomNumber(0, Names.Count)];
+            return names[UserUtils.GenerateRandomNumber(0, names.Count)];
         }
     }
 
@@ -337,17 +360,22 @@ namespace CarService
 
         public Storage()
         {
-            GenerateParts();
+            int minLimitAmountPart = 100;
+            int maxLimitAmountPart = 500;
+
+            CreatorListParts creatorListParts = new CreatorListParts();
+
+            _parts = creatorListParts.GenerateUnbrokenParts(minLimitAmountPart, maxLimitAmountPart);
         }
 
         public int PartsCount => _parts.Count;
 
-        public bool TryGetPart(Part part, out Part unbrokenPart)
+        public bool TryGetPart(string partName, out Part unbrokenPart)
         {
 
             for (int i = 0; i < _parts.Count; i++)
             {
-                if (_parts[i].Name == part.Name)
+                if (_parts[i].Name == partName)
                 {
                     unbrokenPart = _parts[i];
                     _parts.RemoveAt(i);
@@ -361,19 +389,6 @@ namespace CarService
             Console.WriteLine("Нужной детали нет.");
 
             return false;
-        }
-
-        private void GenerateParts()
-        {
-            int minLimitAmountPart = 100;
-            int maxLimitAmountPart = 500;
-
-            int amountPart = UserUtils.GenerateRandomNumber(minLimitAmountPart, maxLimitAmountPart);
-
-            CreatorPart creatorPart = new CreatorPart();
-
-            for (int i = 0; i < amountPart; i++)
-                _parts.Add(creatorPart.GenerateUnbrokenPart());
         }
     }
 
